@@ -1,6 +1,8 @@
 package dockertest
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func Test_WaitForLogMessage(t *testing.T) {
@@ -42,4 +45,15 @@ func Test_WaitForLogMessage(t *testing.T) {
 		t.Error("consultou o container errado?", req.URL.Path)
 	}
 
+}
+
+func Test_WaitForLogMessage2(t *testing.T) {
+	target := wait.NopStrategyTarget{
+		ReaderCloser: io.NopCloser(bytes.NewReader([]byte("kubernetes\r\ndocker\n\rdocker"))),
+	}
+
+	err := WaitForLogMessage2("not found", time.Second*100, nil, target)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
