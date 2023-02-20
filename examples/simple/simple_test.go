@@ -13,10 +13,10 @@ func TestSimple(t *testing.T) {
 	st := stage.CreateStage("Primeiro")
 	st2 := stage.CreateStage("Segundo")
 
-	st.AddJobMultiStage(func(c *chan bool) {
+	st.AddJobMultiStage(func(w stage.DoneCancelArgGet) {
 		for {
 			select {
-			case <-*c:
+			case <-w.Canceled():
 				fmt.Println("job 1 encerrando via channel")
 				return
 			default:
@@ -24,31 +24,36 @@ func TestSimple(t *testing.T) {
 				time.Sleep(time.Millisecond * 100)
 			}
 		}
-	}, st2)
+	}, st2, nil)
 
-	st.AddJob(func(c *chan bool) {
+	st.AddJob(func(w stage.DoneCancelArgGet) {
 		for _, v := range []string{"H", "E", "L", "L", "O"} {
 			fmt.Println("st1 Job 2, Letra: ", v)
 			time.Sleep(75 * time.Millisecond)
 		}
-		*c <- true
-	})
+		w.Done()
+	}, nil)
 
-	st2.AddJob(func(c *chan bool) {
+	st2.AddJob(func(w stage.DoneCancelArgGet) {
 		for _, v := range []string{"H", "E", "L", "L", "O"} {
 			fmt.Println("st2 Job 1, Letra: ", v)
 			time.Sleep(75 * time.Millisecond)
 		}
-		*c <- true
-	})
+		w.Done()
+	}, nil)
 	st3 := stage.CreateStage("Último")
-	st3.AddJob(func(c *chan bool) {
+	st3.AddJob(func(w stage.DoneCancelArgGet) {
+		argi := w.GetFuncArg()
+		arg, ok := argi.(string) // fazendo cast pro tipo correto, que foi passado via parametro
+		if ok == false {
+			arg = "Default string"
+		}
 		for _, v := range []string{"H", "E", "L", "L", "O"} {
-			fmt.Println("ÚLTIMO!: ", v)
+			fmt.Println(arg, v)
 			time.Sleep(75 * time.Millisecond)
 		}
-		*c <- true
-	})
+		w.Done()
+	}, "Último Job! Com Arg")
 	stages.AddStages([]*stage.Stage{st, st2, st3})
 	stages.Run()
 }
