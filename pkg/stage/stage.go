@@ -3,7 +3,6 @@ package stage
 import (
 	"log"
 	"sync"
-	"time"
 )
 
 type DoneCancelArgGet interface {
@@ -38,7 +37,7 @@ func (j Job) GetFuncArg() interface{} {
 }
 
 func (j Job) Done() {
-	j.jobChan <- true
+	// j.jobChan <- true
 	if j.Begin == j.End {
 		j.End.WaitGroup.Done()
 	}
@@ -88,25 +87,26 @@ func (st *Stage) AddJobMultiStage(work func(DoneCancelArgGet), endStage *Stage, 
 	}
 	if st == endStage {
 		log.Default().Println("Adicionando ao wait Group", st.Id)
+		st.Jobs = append(st.Jobs, job)
 		endStage.WaitGroup.Add(1)
+	} else {
+		endStage.JobsToFinish = append(endStage.JobsToFinish, job)
 	}
 
-	st.Jobs = append(st.Jobs, job)
-	println("Len de jobs", len(st.Jobs))
 	return &job
 }
 
 func (st *Stage) runWork(j Job) {
 	go j.Work(&j)
 	//println("Job finalizado. Check se job.WG == stage.WG", j.WaitGroup == st.WaitGroup)
-	select {
-	case <-j.Wait():
-		log.Default().Println("End channel")
-	case <-time.After(15 * time.Second):
-		// colocar em uma propriedade do Stage ou do Job?
-		// como remover pros jobs multistage?
-		log.Default().Println("Job timeout 15s")
-	}
+	// select {
+	// case <-j.Wait():
+	// 	log.Default().Println("End channel")
+	// case <-time.After(15 * time.Second):
+	// 	// colocar em uma propriedade do Stage ou do Job?
+	// 	// como remover pros jobs multistage?
+	// 	log.Default().Println("Job timeout 15s")
+	// }
 	// if j.Begin == j.End {
 	// 	j.End.WaitGroup.Done() // como colocar um WG
 	// }
@@ -114,15 +114,16 @@ func (st *Stage) runWork(j Job) {
 
 // Roda um estágio
 func (st *Stage) Run() {
-	for _, job := range st.Jobs {
+	for _, job := range append(st.Jobs, st.JobsToFinish...) {
 		go st.runWork(job)
 	}
 	st.Wait()
 	log.Default().Println("Finalizando stage: ", st.Id)
 	// FIXME: melhorar logica, usar apenas um canal ou preciso de uma para cada job?
-	for _, job := range st.Jobs {
+	for _, job := range append(st.Jobs, st.JobsToFinish...) {
 		close(job.jobChan)
 	}
+
 	close(st.channel)
 }
 

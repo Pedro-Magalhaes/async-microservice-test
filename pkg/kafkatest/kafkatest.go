@@ -50,11 +50,6 @@ func NewKafka(kConfig kafka.ConfigMap) (*KafkaHelper, error) {
 		return nil, err
 	}
 
-	k.kafkaConsumer, err = kafka.NewConsumer(&kConfig)
-	if err != nil {
-		log.Println("Erro criando consumer do kafka")
-		return nil, err
-	}
 	return &k, nil
 }
 
@@ -62,6 +57,10 @@ func (k *KafkaHelper) NewConsumer(groupId string) (*kafka.Consumer, error) {
 	consumerConfig := cloneConfigMap(k.kConfig)
 	consumerConfig.SetKey("group.id", groupId)
 	return kafka.NewConsumer(&consumerConfig)
+}
+
+func (k *KafkaHelper) Produce(topic, msg string, confirmDelivery chan kafka.Event) error {
+	return k.kafkaProducer.Produce(&kafka.Message{TopicPartition: kafka.TopicPartition{Topic: &topic}, Value: []byte(msg)}, confirmDelivery)
 }
 
 func (k KafkaHelper) CreateTopics(t *topic.TopicConfig) {

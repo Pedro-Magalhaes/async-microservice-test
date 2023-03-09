@@ -1,16 +1,9 @@
 package dockertest
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"errors"
-	"fmt"
-	"log"
-	"strings"
 	"time"
 
-	docker "github.com/fsouza/go-dockerclient"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -67,93 +60,8 @@ import (
 // 	return conf, nil
 // }
 
-func WaitForLogMessage(message string, timeout time.Duration, dockerClient *docker.Client, containerId string) error {
-	// Cria um objeto "Client" do Docker
-	// dockerClient, err := docker.NewClientFromEnv()
-	// if err != nil {
-	// 	return err
-	// }
-
-	// Cria um contexto para a operação
-	ctx := context.Background()
-	var buf bytes.Buffer
-	// Obtém as informações do container
-	err := dockerClient.Logs(docker.LogsOptions{
-		Container:    containerId,
-		OutputStream: &buf,
-		Follow:       true,
-		Tail:         "",
-		Stdout:       true,
-		Stderr:       true,
-		RawTerminal:  true,
-		Context:      ctx,
-	})
-	// containerInfo, err := dockerClient.ContainerInspect(ctx, containerName)
-	if err != nil {
-		return err
-	}
-	log.Default().Println(buf.String())
-	s := bufio.NewScanner(&buf)
-	if s == nil {
-		return errors.New("could not create the buffer scanner")
-	}
-	log.Default().Println("Antes do scan func wait....", s.Text())
-	for {
-		hasTokens := s.Scan()
-		if !hasTokens {
-			log.Default().Println("scan retorna false")
-			break
-		}
-		line := s.Text()
-		fmt.Println(line)
-		if strings.Contains(line, message) {
-			fmt.Println("found string")
-			return nil
-		}
-	}
-
-	// Obtém os logs do container
-	// reader, err := dockerClient.ContainerLogs(ctx, containerName, logOptions)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// Cria um canal para receber o resultado da operação
-	// result := make(chan error)
-
-	// Cria um objeto "Tail" para monitorar o log
-	// tailer, err := tail.TailReader(reader, &tail.Config{
-	// 	Follow: true,
-	// 	ReOpen: true,
-	// })
-	// if err != nil {
-	// 	return err
-	// }
-
-	// Inicia uma goroutine para monitorar o log
-	// go func() {
-	// 	for line := range tailer.Lines {
-	// 		fmt.Println(line.Text)
-	// 		if line.Text == message {
-	// 			result <- nil
-	// 			return
-	// 		}
-	// 	}
-	// 	result <- fmt.Errorf("Timeout: string %q not found in log of container %q", message, containerName)
-	// }()
-
-	// Espera o resultado da operação ou o timeout
-	// select {
-	// case err := <-result:
-	// 	return err
-	// case <-time.After(timeout):
-	// 	return fmt.Errorf("Timeout: string %q not found in log of container %q", message, containerName)
-	// }
-	return nil
-}
-
-func WaitForLogMessage2(message string, timeout time.Duration, dockerClient *docker.Client, container wait.StrategyTarget) error {
+func WaitForLogMessage2(message string, timeout time.Duration, container wait.StrategyTarget) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return wait.ForLog(message).WithOccurrence(1).WithStartupTimeout(1000*time.Microsecond).WaitUntilReady(ctx, container)
+	return wait.ForLog(message).WithOccurrence(3).WithStartupTimeout(timeout).WaitUntilReady(ctx, container)
 }
