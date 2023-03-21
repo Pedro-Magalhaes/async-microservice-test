@@ -43,9 +43,9 @@ func (j Job) Done() {
 	}
 }
 
-func (j Job) Wait() chan interface{} {
-	return j.jobChan
-}
+// func (j Job) Wait() chan interface{} {
+// 	return j.jobChan
+// }
 
 func (j Job) Canceled() chan interface{} {
 	return j.jobChan

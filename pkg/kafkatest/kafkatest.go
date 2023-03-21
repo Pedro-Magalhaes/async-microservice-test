@@ -11,6 +11,11 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
+const (
+	OffsetEarliest = "earliest"
+	OffsetLatest   = "latest"
+)
+
 type KafkaHelper struct {
 	server         string
 	kConfig        kafka.ConfigMap
@@ -53,9 +58,11 @@ func NewKafka(kConfig kafka.ConfigMap) (*KafkaHelper, error) {
 	return &k, nil
 }
 
-func (k *KafkaHelper) NewConsumer(groupId string) (*kafka.Consumer, error) {
+func (k *KafkaHelper) NewConsumer(groupId, offsetConfig string) (*kafka.Consumer, error) {
 	consumerConfig := cloneConfigMap(k.kConfig)
 	consumerConfig.SetKey("group.id", groupId)
+	consumerConfig.SetKey("auto.offset.reset", offsetConfig)
+	// auto.offset.reset
 	return kafka.NewConsumer(&consumerConfig)
 }
 
@@ -94,21 +101,25 @@ func (k KafkaHelper) CreateTopics(t *topic.TopicConfig) {
 	log.Printf("topics: %v\n", topics)
 
 	// TODO: como ver se o tópico está pronto para receber mensagens?
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Second * 2)
 
 	for _, v := range t.Topics {
 		if len(v.Messages) > 0 {
 			log.Println("Deveria colocar as mensagens: ")
 			log.Println(v.Messages)
 		}
+		deliveryChan := make(chan kafka.Event)
 		for _, m := range v.Messages {
-			k.kafkaProducer.Produce(&kafka.Message{
+			err := k.kafkaProducer.Produce(&kafka.Message{
 				TopicPartition: kafka.TopicPartition{Topic: &v.Name, Partition: int32(m.Partition)},
 				Value:          []byte(m.Message),
-			}, nil)
+			}, deliveryChan)
+			if err != nil {
+				panic(err)
+			}
+			<-deliveryChan
 		}
 	}
-
 }
 
 func defaultServer() string {

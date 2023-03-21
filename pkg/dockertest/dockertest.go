@@ -60,8 +60,8 @@ import (
 // 	return conf, nil
 // }
 
-func WaitForLogMessage2(message string, timeout time.Duration, container wait.StrategyTarget) error {
+func WaitForLogMessage(message string, occurrence int, timeout time.Duration, container wait.StrategyTarget) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return wait.ForLog(message).WithOccurrence(3).WithStartupTimeout(timeout).WaitUntilReady(ctx, container)
+	return wait.ForLog(message).WithOccurrence(occurrence).WithStartupTimeout(timeout).WaitUntilReady(ctx, container)
 }

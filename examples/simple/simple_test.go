@@ -4,6 +4,8 @@ import (
 	"context"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -67,17 +69,17 @@ import (
 // 	stages.Run()
 // }
 
-func checkMessages(kafkaConsumer *kafka.Consumer, messageMap map[string][]string) {
-	log.Print("oi from check")
+func checkMessages(kafkaConsumer *kafka.Consumer, messageMap map[string][]string, t *testing.T) {
+	// log.Print("oi from check")
 	// Process messages
 	ev, err := kafkaConsumer.ReadMessage(100 * time.Millisecond)
 	if err != nil {
-			// Errors are informational and automatically handled by the consumer
+		// Errors are informational and automatically handled by the consumer
 		return
 	}
 	// *&ev.TopicPartition.Offset
 	// vou ignorar as keys por enquanto
-	log.Printf("Consumed event from topic %s: key = %-10s value = %s\n",
+	t.Logf("Consumed event from topic %s: key = %-10s value = %s\n",
 		*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
 	messageMap[*ev.TopicPartition.Topic] = append(messageMap[*ev.TopicPartition.Topic], string(ev.Value))
 
@@ -108,7 +110,7 @@ func testSimpleDocker(t *testing.T) {
 
 	st2.AddJob(func(dcag stage.DoneCancelArgGet) {
 		defer dcag.Done()
-		err := dockertest.WaitForLogMessage2("oi", time.Second*3, c)
+		err := dockertest.WaitForLogMessage("oi", 1, time.Second*3, c)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,22 +125,58 @@ func testSimpleDocker(t *testing.T) {
 }
 
 func TestSimpleOdj(t *testing.T) {
-	var c testcontainers.Container
+	const (
+		entryTopic = "demanda-submetida"
+		errorTopic = "demanda-falhada"
+		outTopic   = "resposta-complementacao-judicial"
+	)
+	var containerOdj testcontainers.Container
 	topicMessages := make(map[string][]string)
 	stages := stage.CreateStages()
 	st := stage.CreateStage("Primeiro")
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
+	mockLightsvr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Log("Responding fake error")
+		w.WriteHeader(400)
+		w.Write([]byte("Fake error"))
+	}))
+	defer mockLightsvr.Close()
+	// mockKeyclocksvr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 	t.Log("Mock keyclock")
+	// 	bd, _ := ioutil.ReadAll(r.Body)
+	// 	t.Log(r.RequestURI)
+	// 	t.Log(r.URL.RawQuery)
+	// 	t.Log(string(bd))
+	// 	w.WriteHeader(200)
+	// 	w.Write([]byte(`{
+	// 		"access_token": "0470b16b-7bf8-4fa3-9ae1-6a10e0f0b699",
+	// 		"scope": "openid",
+	// 		"token_type": "bearer",
+	// 		"expires_in": 299
+	// 	}`))
+	// 	t.FailNow() // REMOVE!
+	// }))
+	// defer mockKeyclocksvr.Close()
+
 	r := testcontainers.ContainerRequest{
-		Image:      "repo.tecgraf.puc-rio.br:18089/odrtj/odr-complementacao-tj:master",
-		WaitingFor: wait.ForHTTP("/q/health/live").WithPort("8080/tcp").WithStartupTimeout(time.Second * 10),
-		// Networks:   []string{testNetworkName},
-		Env: map[string]string{"ODR_KAFKA_HOST": "localhost:9092"},
+		Image: "repo.tecgraf.puc-rio.br:18089/odrtj/odr-complementacao-tj:master",
+		WaitingFor: wait.ForHTTP("/q/health/live").WithPort("8888/tcp").WithStatusCodeMatcher(func(status int) bool {
+			return status >= 200 && status <= 299
+		}).WithStartupTimeout(time.Second * 10),
+		Env: map[string]string{
+			"ODR_KAFKA_HOST":                 "localhost:9092",
+			"ODR_TJRJ_PROCESSOS_RETRY_DELAY": "100",
+			"ODR_TJRJ_PROCESSOS_TIMEOUT":     "1000",
+			"ODR_HTTP_PORT":                  "8888",
+			// "ODR_LOG_LEVEL":                  "DEBUG",
+			"ODR_TJRJ_PROCESSOS_URI": mockLightsvr.URL,
+			"ODR_TJRJ_OIDC_URI":      "localhost:8080",
+		},
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
-		// ExposedPorts: []string{"8080"},
 	}
 
 	k, err := kafkatest.NewKafka(kafka.ConfigMap{"bootstrap.servers": "localhost:9092",
@@ -146,57 +184,70 @@ func TestSimpleOdj(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.CreateTopics(&topic.TopicConfig{Topics: []topic.Topics{ // demanda-falhada
-		{Name: "demanda-submetida", NumPartitions: 1, Messages: []topic.Messages{}},
-		{Name: "resposta-complementacao-judicial", NumPartitions: 1, Messages: []topic.Messages{}},
-		{Name: "demanda-falhada", NumPartitions: 1, Messages: []topic.Messages{}},
+	k.CreateTopics(&topic.TopicConfig{Topics: []topic.Topics{
+		{Name: entryTopic, NumPartitions: 1, Messages: []topic.Messages{}},
+		{Name: outTopic, NumPartitions: 1, Messages: []topic.Messages{}},
+		{Name: errorTopic, NumPartitions: 1, Messages: []topic.Messages{}},
 	}})
 
-	consumer, err := k.NewConsumer("test-group")
+	consumer, err := k.NewConsumer("test-group", kafkatest.OffsetEarliest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = consumer.SubscribeTopics([]string{"demanda-submetida", "demanda-falhada"}, nil)
+
+	err = consumer.SubscribeTopics([]string{entryTopic, errorTopic}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// consumer.
+
+	// Inicia o serviço de complementação e aguarda resposta do health check para terminar
 	st.AddJob(func(dcag stage.DoneCancelArgGet) {
 		defer dcag.Done()
 		var err error
-		c, err = testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
+		log.Println("Inicio job inicia docker")
+		containerOdj, err = testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
 			ContainerRequest: r,
 			Started:          true,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		log.Println("Fim job inicia docker", c.IsRunning())
+		log.Println("Fim job inicia docker", containerOdj.IsRunning())
 	}, nil)
 
-	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) {
+	// Job multi estágio que vai ficar periodicamente checando mensagens nos tópicos subscritos
+	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) { // TODO: alterar interface para MultiStage, Done() não é necessário
 		ticker := time.NewTicker(time.Millisecond * 100)
 		defer ticker.Stop()
+		checkMessages(consumer, topicMessages, t)
 		for {
 			select {
-				case <-dcag.Canceled(): // cancelado ao final do estagio st2
-					t.Log("Job de checagem de mensagens cancelado")
-					return
-				case <-ticker.C:
-					t.Log("check message")
-					checkMessages(consumer, topicMessages)
+			case <-dcag.Canceled(): // cancelado ao final do estagio st3
+				t.Log("Job de checagem de mensagens cancelado")
+				return
+			case <-ticker.C:
+				// t.Log("check message")
+				checkMessages(consumer, topicMessages, t)
 			}
 		}
-		// dcag.Done() // não precisa pra jobs multistage
-	}, st2, nil)
+	}, st3, nil)
 
+	// produz uma mensagem mal formatada para o tópico de entrada do serviço de complementação
 	st2.AddJob(func(dcag stage.DoneCancelArgGet) {
 		produceChan := make(chan kafka.Event)
-		
-		err = k.Produce("demanda-submetida", "{}", produceChan)
+		time.Sleep(time.Second * 4) // Health check da complementação fica 200 antes de estar pronto pra consumir
+		// Envia para falha recuperavel --
+		err = k.Produce(entryTopic, `{"documentoDemandada": 22211133344, "documentoDemandante": 22211133344, "idDemanda": "234"}`, produceChan)
+
+		// causa erro ao abrir o json, não envia mensagem ao tópico de falhas
+		// err = k.Produce(entryTopic, `{"documentoDemandada": 22211133344, "documentoDemandante": 22211133344, "idDemanda": "234L"}`, produceChan)
+		// err = k.Produce(entryTopic, "{'not': 'valid', 'format': 'null'}", produceChan)
+		// err = k.Produce(entryTopic, "{'not': 'valid', 'format': 'null'}", produceChan) // ' causa erro na aplicação sem enviar para topico de falha
+		// err = k.Produce(entryTopic, "{'not': 'valid', 'format': 'null'}", produceChan)
+		// err = k.Produce(entryTopic, "{'not': 'valid', 'format': 'null'}", produceChan)
+
 		if err != nil {
 			t.Fatal(err)
-
 		}
 		select {
 		case <-time.After(5 * time.Second):
@@ -204,34 +255,46 @@ func TestSimpleOdj(t *testing.T) {
 		case <-produceChan:
 			dcag.Done()
 		}
-		
+
 	}, nil)
-	
+
+	// Job para verificar que o tópico demanda-falhada recebeu uma nova mensagem
 	st3.AddJob(func(dcag stage.DoneCancelArgGet) {
-		defer dcag.Done() 
+		defer dcag.Done()
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		to := time.NewTimer(5 * time.Second)
+		to := time.NewTimer(10 * time.Second)
 		defer to.Stop()
 		for {
 			select {
-				case <-to.C:
-					t.Fatal("Não recebeu mensagem no canal de falha")
-					return // timeout
-				case <-ticker.C:
-					if len(topicMessages["demanda-falhada"]) > 0 {
-						t.Log(topicMessages["demanda-falhada"][0])
-						return
-					}
+			case <-to.C: // timeout
+				t.Fatal("Não recebeu mensagem no canal de falha")
+				return
+			case <-ticker.C:
+				t.Log("Teste array demanda-falhada")
+				if len(topicMessages[errorTopic]) > 0 {
+					t.Log(topicMessages[errorTopic][0])
+					return
+				}
 			}
 		}
 	}, nil)
 
 	stages.AddStages([]*stage.Stage{st, st2, st3})
 	stages.Run()
-	
-	read,err := c.Logs(context.Background())
-	
+
+	read, err := containerOdj.Logs(context.Background())
+
 	text, err := ioutil.ReadAll(read)
 	t.Log(string(text)) // // DEBUG
 }
+
+// 	String documentoDemandada = "111222333444555";
+//  String documentoDemandante = "22211133344";
+//  Long idDemanda = 234L;
+//  List<String> processos = Arrays.asList("1111111-22.2021.4.02.2222");
+//  LocalDate dataReferencia = LocalDate.now().minusYears(horizonteAnos);
+//  DemandaSubmetidaDTO demandaSubmetida = new DemandaSubmetidaDTO();
+//  demandaSubmetida.setDocumentoDemandada(documentoDemandada);
+//  demandaSubmetida.setDocumentoDemandante(documentoDemandante);
+//  demandaSubmetida.setIdDemanda(idDemanda);
