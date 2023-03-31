@@ -222,7 +222,8 @@ func TestIncorrectMessage(t *testing.T) {
 	stages := stage.CreateStages()
 	st1 := stage.CreateStage("estágio 0")
 	var container testcontainers.Container
-	st1.AddJob(func(c *chan bool) {
+	st1.AddJob( func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
 		l.Println("st1j0")
 		req := testcontainers.ContainerRequest{
 			Image:        "a863582a7457",
@@ -249,11 +250,10 @@ func TestIncorrectMessage(t *testing.T) {
 			t.Fatal(err)
 		}
 		l.Println("Terminando j0", container)
-		*c <- true
-	})
+	}, nil)
 
-	st1.AddJob(func(c *chan bool) {
-
+	st1.AddJob(func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
 		req := testcontainers.ContainerRequest{
 			Image:        "a863582a7457",
 			ExposedPorts: []string{"8080/tcp"},
@@ -270,9 +270,7 @@ func TestIncorrectMessage(t *testing.T) {
 		}
 		// req.
 		l.Println("st1 j1", req)
-		*c <- true
-
-	})
+	}, nil)
 	l.Println("Adding stage")
 	// stages.AddStages([]*stage.Stage{st1})
 	stages.AddStage(st1)

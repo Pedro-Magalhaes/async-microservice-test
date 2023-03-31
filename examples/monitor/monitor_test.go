@@ -137,3 +137,95 @@ func TestFileWithInitialContent(t *testing.T) {
 	}
 	t.Log(string(text)) // DEBUG
 }
+
+
+// Reproduz bug do monitor que não envia msg até que tenha ocorrido mudança no arquivo
+func TestReplicas(t *testing.T) {
+	var containerMonitor testcontainers.Container
+	stages := stage.CreateStages()
+	st := stage.CreateStage("inicia_container")
+	st2 := stage.CreateStage("envia msg e aguarda o monitor receber")
+	st3 := stage.CreateStage("aguarda msg no topico do arquivo")
+
+	const monitorReadyLogMsg = "TIME SPENT WAITING FOR STATE RECOVERY"
+	r := testcontainers.ContainerRequest{
+		Image:      "monitor:0.0.1-snapshot",
+		WaitingFor: wait.ForLog(monitorReadyLogMsg).WithOccurrence(1).WithStartupTimeout(time.Second * 10),
+		Mounts:     monitorMounts,
+		HostConfigModifier: func(hc *container.HostConfig) {
+			hc.NetworkMode = "host"
+		},
+	}
+
+	// inicializa helper do kafka
+	k, err := kafkatest.NewKafka(kafka.ConfigMap{"bootstrap.servers": "localhost:9092",
+		"acks": "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cria os tópicos
+	k.CreateTopics(&tConfig)
+	// Cria o consumidor e subscreve ao tópico de interesse
+	consumer, err := k.NewConsumer("test-group", kafkatest.OffsetEarliest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = consumer.SubscribeTopics([]string{oneLineFileTopic}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	st.AddJob(func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
+		var err error
+		containerMonitor, err = testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
+			ContainerRequest: r,
+			Started:          true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}, nil)
+
+	st2.AddJob(func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
+		ch := make(chan kafka.Event)
+		k.Produce("monitor_interesse", fmt.Sprintf(`{ "path": "%s", "project": "p1", "watch": true}`, oneLineFile), ch)
+		<-ch // Aguarda confirmação de entrega
+	}, nil)
+
+	st2.AddJob(func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
+		log.Println("Waiting for the monitor to recieve the msg")
+		err := dockertest.WaitForLogMessage(oneLineFileName, 1, time.Second*3, containerMonitor)
+		if err != nil {
+			t.Fatal(err) // timeout
+		}
+		log.Println("Monitor got the msg")
+	}, nil)
+
+	st3.AddJob(func(dcag stage.DoneCancelArgGet) {
+		defer dcag.Done()
+		const timeout = time.Second * 5
+		m, err := consumer.ReadMessage(timeout)
+		if err != nil {
+			t.Fatal(err) // timeout
+		}
+		assert.NotEmpty(t, m)
+	}, nil)
+
+	stages.AddStages([]*stage.Stage{st, st2, st3})
+	stages.Run()
+
+	// INIT DEBUG
+	t.Log("\n\n*******DEBUG*******\n\n") // DEBUG
+	read, err := containerMonitor.Logs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(string(text)) // DEBUG
+}

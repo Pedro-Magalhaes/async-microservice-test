@@ -12,7 +12,6 @@ func TestJob_GetFuncArg(t *testing.T) {
 		Begin   *Stage
 		End     *Stage
 		Work    func(DoneCancelArgGet)
-		jobChan chan interface{}
 		funcArg interface{}
 	}
 	tests := []struct {
@@ -30,7 +29,6 @@ func TestJob_GetFuncArg(t *testing.T) {
 				Begin:   tt.fields.Begin,
 				End:     tt.fields.End,
 				Work:    tt.fields.Work,
-				jobChan: tt.fields.jobChan,
 				funcArg: tt.fields.funcArg,
 			}
 			if got := j.GetFuncArg(); !reflect.DeepEqual(got, tt.want) {
@@ -92,7 +90,6 @@ func TestJob_Canceled(t *testing.T) {
 		Begin   *Stage
 		End     *Stage
 		Work    func(DoneCancelArgGet)
-		jobChan chan interface{}
 		funcArg interface{}
 	}
 	tests := []struct {
@@ -108,7 +105,6 @@ func TestJob_Canceled(t *testing.T) {
 				Begin:   tt.fields.Begin,
 				End:     tt.fields.End,
 				Work:    tt.fields.Work,
-				jobChan: tt.fields.jobChan,
 				funcArg: tt.fields.funcArg,
 			}
 			if got := j.Canceled(); !reflect.DeepEqual(got, tt.want) {
@@ -150,9 +146,8 @@ func TestStage_Wait(t *testing.T) {
 	type fields struct {
 		Id           string
 		WaitGroup    *sync.WaitGroup
-		Jobs         []Job
-		JobsToFinish []Job
-		channel      chan bool
+		Jobs         []*Job
+		channel      chan interface{}
 	}
 	tests := []struct {
 		name   string
@@ -166,7 +161,6 @@ func TestStage_Wait(t *testing.T) {
 				Id:           tt.fields.Id,
 				WaitGroup:    tt.fields.WaitGroup,
 				Jobs:         tt.fields.Jobs,
-				JobsToFinish: tt.fields.JobsToFinish,
 				channel:      tt.fields.channel,
 			}
 			s.Wait()
@@ -178,9 +172,8 @@ func TestStage_AddJob(t *testing.T) {
 	type fields struct {
 		Id           string
 		WaitGroup    *sync.WaitGroup
-		Jobs         []Job
-		JobsToFinish []Job
-		channel      chan bool
+				Jobs         []*Job
+		channel      chan interface{}
 	}
 	type args struct {
 		work    func(DoneCancelArgGet)
@@ -199,7 +192,6 @@ func TestStage_AddJob(t *testing.T) {
 				Id:           tt.fields.Id,
 				WaitGroup:    tt.fields.WaitGroup,
 				Jobs:         tt.fields.Jobs,
-				JobsToFinish: tt.fields.JobsToFinish,
 				channel:      tt.fields.channel,
 			}
 			st.AddJob(tt.args.work, tt.args.workArg)
@@ -211,9 +203,8 @@ func TestStage_AddJobMultiStage(t *testing.T) {
 	type fields struct {
 		Id           string
 		WaitGroup    *sync.WaitGroup
-		Jobs         []Job
-		JobsToFinish []Job
-		channel      chan bool
+				Jobs         []*Job
+		channel      chan interface{}
 	}
 	type args struct {
 		work     func(DoneCancelArgGet)
@@ -234,7 +225,6 @@ func TestStage_AddJobMultiStage(t *testing.T) {
 				Id:           tt.fields.Id,
 				WaitGroup:    tt.fields.WaitGroup,
 				Jobs:         tt.fields.Jobs,
-				JobsToFinish: tt.fields.JobsToFinish,
 				channel:      tt.fields.channel,
 			}
 			if got := st.AddJobMultiStage(tt.args.work, tt.args.endStage, tt.args.workArg); !reflect.DeepEqual(got, tt.want) {
@@ -248,12 +238,11 @@ func TestStage_runWork(t *testing.T) {
 	type fields struct {
 		Id           string
 		WaitGroup    *sync.WaitGroup
-		Jobs         []Job
-		JobsToFinish []Job
-		channel      chan bool
+				Jobs         []*Job
+		channel      chan interface{}
 	}
 	type args struct {
-		j Job
+		j *Job
 	}
 	tests := []struct {
 		name   string
@@ -268,7 +257,6 @@ func TestStage_runWork(t *testing.T) {
 				Id:           tt.fields.Id,
 				WaitGroup:    tt.fields.WaitGroup,
 				Jobs:         tt.fields.Jobs,
-				JobsToFinish: tt.fields.JobsToFinish,
 				channel:      tt.fields.channel,
 			}
 			st.runWork(tt.args.j)
@@ -280,9 +268,8 @@ func TestStage_Run(t *testing.T) {
 	type fields struct {
 		Id           string
 		WaitGroup    *sync.WaitGroup
-		Jobs         []Job
-		JobsToFinish []Job
-		channel      chan bool
+				Jobs         []*Job
+		channel      chan interface{}
 	}
 	tests := []struct {
 		name   string
@@ -296,7 +283,6 @@ func TestStage_Run(t *testing.T) {
 				Id:           tt.fields.Id,
 				WaitGroup:    tt.fields.WaitGroup,
 				Jobs:         tt.fields.Jobs,
-				JobsToFinish: tt.fields.JobsToFinish,
 				channel:      tt.fields.channel,
 			}
 			st.Run()
