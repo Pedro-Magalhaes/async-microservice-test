@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/topic"
+	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/kafkatest/topic"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
@@ -70,6 +70,14 @@ func (k *KafkaHelper) Produce(topic, msg string, confirmDelivery chan kafka.Even
 	return k.kafkaProducer.Produce(&kafka.Message{TopicPartition: kafka.TopicPartition{Topic: &topic}, Value: []byte(msg)}, confirmDelivery)
 }
 
+func (k *KafkaHelper) ProduceToPartition(topic, msg string, partition int32, confirmDelivery chan kafka.Event) error {
+	return k.kafkaProducer.Produce(&kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic: &topic, Partition: partition,
+		},
+		Value: []byte(msg)}, confirmDelivery)
+}
+
 func (k KafkaHelper) CreateTopics(t *topic.TopicConfig) {
 	var topicNames []string = make([]string, len(t.Topics))
 	var specifications []kafka.TopicSpecification = make([]kafka.TopicSpecification, len(t.Topics))
@@ -81,26 +89,25 @@ func (k KafkaHelper) CreateTopics(t *topic.TopicConfig) {
 			ReplicationFactor: 1,
 		}
 	}
-	var _, e = k.kafkaAdmClient.DeleteTopics(context.Background(), topicNames)
+	_, e := k.kafkaAdmClient.DeleteTopics(context.Background(), topicNames, kafka.SetAdminOperationTimeout(time.Second * 2))
 	if e != nil {
 		log.Println("Não foi possivel deletar os topicos")
 		log.Println(topicNames)
 		panic(e)
 	}
 
-	// TODO: como aguardar a deleção dos tópicos?
-	time.Sleep(time.Second * 1)
 
-	var topics, err = k.kafkaAdmClient.CreateTopics(context.Background(), specifications)
+	// Limitação da lib Kafka de Go: precisamos aguardar o broker reconhecer a deleção dos tópicos
+	time.Sleep(time.Second * 2) 
+
+	_, err := k.kafkaAdmClient.CreateTopics(context.Background(), specifications)
 	if err != nil {
 		log.Println("Não foi possivel criar os tópicos")
 		log.Println(topicNames)
 		panic(err)
 	}
 
-	log.Printf("topics: %v\n", topics)
-
-	// TODO: como ver se o tópico está pronto para receber mensagens?
+	// Limitação da lib Kafka de Go: precisamos aguardar o broker reconhecer a criação dos tópicos
 	time.Sleep(time.Second * 2)
 
 	for _, v := range t.Topics {
@@ -120,6 +127,27 @@ func (k KafkaHelper) CreateTopics(t *topic.TopicConfig) {
 			<-deliveryChan
 		}
 	}
+}
+
+func (k KafkaHelper) DeleteTopics(t []string) {
+	k.kafkaAdmClient.DeleteTopics(context.Background(), t, kafka.SetAdminOperationTimeout(time.Second * 2))
+}
+
+func (k KafkaHelper) ResetOffsets() { // remove o topico que armazena ofsets
+	k.kafkaAdmClient.DeleteTopics(context.Background(), []string{"__consumer_offsets"})
+}
+
+func (k KafkaHelper) Close() {
+	if k.kafkaAdmClient != nil {
+		k.kafkaAdmClient.Close()
+	}
+	if k.kafkaConsumer != nil {
+		k.kafkaConsumer.Close()
+	}
+	if k.kafkaProducer != nil {
+		k.kafkaProducer.Close()
+	}
+
 }
 
 func defaultServer() string {

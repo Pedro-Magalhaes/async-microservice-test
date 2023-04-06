@@ -31,10 +31,15 @@ type Job struct {
 	hasFinished bool
 }
 
+/* Job */
+
 func (j *Job) GetFuncArg() interface{} {
 	return j.funcArg
 }
 
+// Informa ao estágio que o Job terminou
+// Sempre deve ser chamada ao final do Job de estágio único
+// o estágio não termina até que todos os Jobs tenham chamado essa função
 func (j *Job) Done() {
 	if j.Begin == j.End && !j.hasFinished {
 		j.hasFinished = true //evita que o mesmo job chame done() mais de 1 vez
@@ -42,16 +47,13 @@ func (j *Job) Done() {
 	}
 }
 
+// Retorna um canal que informa se o estágio final do Job terminou
+// Deve ser usado em Jobs multiestágio para terminar quando seu estágio final terminar
 func (j *Job) Canceled() chan interface{} {
 	return j.End.channel
 }
 
-func CreateStages() *Stages {
-	return &Stages{
-		make(map[string]*Stage),
-		[]*Stage{},
-	}
-}
+/* Stage */
 
 func CreateStage(id string) *Stage {
 	return &Stage{
@@ -66,12 +68,12 @@ func (s *Stage) Wait() {
 	s.WaitGroup.Wait()
 }
 
-// Adicona uma tarefa ao estágio
+// Cria um Job de um único estágio
 func (st *Stage) AddJob(work func(DoneCancelArgGet), workArg interface{}) {
 	st.AddJobMultiStage(work, st, workArg)
 }
 
-// Adiciona uma tarefa que inicia em um estágio mas termina em outro
+// Adiciona um Job que inicia em um estágio e pode terminar em outro
 func (st *Stage) AddJobMultiStage(work func(DoneCancelArgGet), endStage *Stage, workArg interface{}) *Job {
 	job := Job{
 		Work:    work,
@@ -88,10 +90,6 @@ func (st *Stage) AddJobMultiStage(work func(DoneCancelArgGet), endStage *Stage, 
 	return &job
 }
 
-func (st *Stage) runWork(j *Job) {
-	go j.Work(j)
-}
-
 // Roda um estágio
 func (st *Stage) Run() {
 	for _, job := range st.Jobs {
@@ -102,17 +100,33 @@ func (st *Stage) Run() {
 	close(st.channel)
 }
 
+func (st *Stage) runWork(j *Job) {
+	go j.Work(j)
+}
+
+/* Stages */
+
+func CreateStages() *Stages {
+	return &Stages{
+		make(map[string]*Stage),
+		[]*Stage{},
+	}
+}
+
 // Adiciona um estágio
-func (s *Stages) AddStage(st *Stage) {
+func (s *Stages) AddStage(st *Stage) *Stages {
+	s.stagesArray = append(s.stagesArray, st)
 	s.stages[st.Id] = st
+	return s
 }
 
 // Adiciona um array de estágios
-func (s *Stages) AddStages(stages []*Stage) {
+func (s *Stages) AddStages(stages []*Stage) *Stages {
 	s.stagesArray = append(s.stagesArray, stages...)
 	for _, st := range stages {
 		s.stages[st.Id] = st
 	}
+	return s
 }
 
 // retorna um estágio dado um id

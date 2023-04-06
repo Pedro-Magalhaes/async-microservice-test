@@ -13,8 +13,8 @@ import (
 
 	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/dockertest"
 	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/kafkatest"
+	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/kafkatest/topic"
 	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/stage"
-	"github.com/Pedro-Magalhaes/async-microservice-test/pkg/topic"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/assert"
@@ -23,11 +23,11 @@ import (
 )
 
 const (
-	entryTopic = "demanda-submetida"
-	errorTopic = "demanda-falhada"
-	outTopic   = "resposta-complementacao-judicial"
-	odrImage = "repo.tecgraf.puc-rio.br:18089/odrtj/odr-complementacao-tj:master"
-	defaultOdrPort = 8888
+	entryTopic      = "demanda-submetida"
+	errorTopic      = "demanda-falhada"
+	outTopic        = "resposta-complementacao-judicial"
+	odrImage        = "repo.tecgraf.puc-rio.br:18089/odrtj/odr-complementacao-tj:master"
+	defaultOdrPort  = 8888
 	defaultGelfPort = 12201
 )
 
@@ -47,10 +47,10 @@ func getNewContainerDefinition(mockServerUrl, entryTopic string) map[string]stri
 		"ODR_TJRJ_PROCESSOS_URI":         mockServerUrl,
 		"ODR_TJRJ_OIDC_URI":              mockServerUrl + "/auth/realms/homologacao",
 		"ODR_TJRJ_OIDC_CLIENT_ID":        "odr",
-		"ODR_TJRJ_OIDC_CLIENT_SECRET":    "66e56811-fff0-4ed6-9132-bd96981f276f",
-		"ODR_TJRJ_OIDC_USERNAME":         "api-reincidencia",
+		"ODR_TJRJ_OIDC_CLIENT_SECRET":    "fake-client-secret-for-test",
+		"ODR_TJRJ_OIDC_USERNAME":         "fake-user",
 		"ODR_TJRJ_OIDC_PASSWORD":         "1234",
-		"ODR_KAFKA_IN_TOPIC": 			  entryTopic,
+		"ODR_KAFKA_IN_TOPIC":             entryTopic,
 	}
 	portOffset++
 	return cDef
@@ -63,7 +63,7 @@ func checkMessages(kafkaConsumer *kafka.Consumer, messageMap map[string][]string
 		// Errors are informational and automatically handled by the consumer
 		return
 	}
-	
+
 	t.Logf("Consumed event from topic %s: key = %-10s value = %s\n",
 		*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
 	// adiciona ao mapa de mensagens
@@ -75,12 +75,12 @@ func createFakeServer(authStatus, tjStatus int) *httptest.Server {
 
 		if strings.Contains(r.URL.Path, "auth") { // requisição token
 			w.WriteHeader(authStatus)
-			w.Write([]byte(`{"access_token": "66e56811-fff0-4ed6-9132-bd96981f276f"}`))
+			w.Write([]byte(`{"access_token": "token-de-acesso-para-chamada"}`))
 			return
 		}
 		w.Header().Set("content-type", "application/json")
 		w.WriteHeader(tjStatus)
-		w.Write([]byte("[\"395566265.2019.8.19.0206\", \"343039222.2021.81.9.0208\", \"527925574.2022.81.9.0029\"]"))
+		w.Write([]byte("[\"111111111.2019.8.19.0206\", \"222222222.2021.81.9.0208\", \"333333333.2022.81.9.0029\"]"))
 	}))
 }
 
@@ -91,14 +91,14 @@ func TestWrongMsgFormat(t *testing.T) {
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
-	mockTJsvr := createFakeServer(200,200)
+	mockTJsvr := createFakeServer(200, 200)
 	defer mockTJsvr.Close()
 
 	env := getNewContainerDefinition(mockTJsvr.URL, entryTopic)
 	r := testcontainers.ContainerRequest{
-		Image: odrImage,
+		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env: env,
+		Env:        env,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
@@ -168,8 +168,8 @@ func TestWrongMsgFormat(t *testing.T) {
 	if containerOdj != nil {
 		containerOdj.Terminate(context.Background())
 	}
-	// DEBUG
-	// t.Log(dockertest.GetAllLog(containerOdj))
+	// Imprime o log completo do container para debug ao final
+	t.Log(dockertest.GetAllLog(containerOdj))
 }
 
 func TestEmptyMsgFormat(t *testing.T) {
@@ -179,19 +179,19 @@ func TestEmptyMsgFormat(t *testing.T) {
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
-	mockTJsvr := createFakeServer(200,200)
+	mockTJsvr := createFakeServer(200, 200)
 	defer mockTJsvr.Close()
 
 	env := getNewContainerDefinition(mockTJsvr.URL, entryTopic)
 	r := testcontainers.ContainerRequest{
-		Image: odrImage,
+		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env: env,
+		Env:        env,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
 	}
-	
+
 	k, err := kafkatest.NewKafka(kafka.ConfigMap{"bootstrap.servers": "localhost:9092",
 		"acks": "all"})
 	if err != nil {
@@ -267,13 +267,13 @@ func TestFailHttpOdj(t *testing.T) {
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
-	mockTJsvr := createFakeServer(200,500)
+	mockTJsvr := createFakeServer(200, 500)
 	defer mockTJsvr.Close()
 	env := getNewContainerDefinition(mockTJsvr.URL, entryTopic)
 	r := testcontainers.ContainerRequest{
-		Image: odrImage,
+		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env: env,
+		Env:        env,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
@@ -387,13 +387,13 @@ func TestCorrectBehaviourOdj(t *testing.T) {
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
-	mockTJsvr := createFakeServer(200,200)
+	mockTJsvr := createFakeServer(200, 200)
 	defer mockTJsvr.Close()
 
 	r := testcontainers.ContainerRequest{
 		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env: getNewContainerDefinition(mockTJsvr.URL, entryTopic),
+		Env:        getNewContainerDefinition(mockTJsvr.URL, entryTopic),
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
@@ -437,7 +437,7 @@ func TestCorrectBehaviourOdj(t *testing.T) {
 	}, nil)
 
 	// Job multi estágio que vai ficar periodicamente checando mensagens nos tópicos subscritos
-	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) { // TODO: alterar interface para MultiStage, Done() não é necessário
+	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) {
 		ticker := time.NewTicker(time.Millisecond * 100)
 		defer ticker.Stop()
 		checkMessages(consumer, topicMessages, t)
@@ -516,19 +516,19 @@ func TestReplicaOdj(t *testing.T) {
 	var containerOdj, containerOdj2 testcontainers.Container
 	topicMessages := make(map[string][]string)
 	var tEntry = getRandTopicName(entryTopic, t.Name())
-	
+
 	stages := stage.CreateStages()
 	st := stage.CreateStage("Primeiro")
 	st2 := stage.CreateStage("Segundo")
 	st3 := stage.CreateStage("Terceiro")
 
-	mockTJsvr := createFakeServer(200,200)
+	mockTJsvr := createFakeServer(200, 200)
 	defer mockTJsvr.Close()
 
 	r1 := testcontainers.ContainerRequest{
 		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env:getNewContainerDefinition(mockTJsvr.URL, tEntry),
+		Env:        getNewContainerDefinition(mockTJsvr.URL, tEntry),
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
@@ -537,7 +537,7 @@ func TestReplicaOdj(t *testing.T) {
 	r2 := testcontainers.ContainerRequest{
 		Image:      odrImage,
 		WaitingFor: wait.ForLog("Profile prod activated").WithPollInterval(time.Second / 2).WithStartupTimeout(time.Second * 10),
-		Env: getNewContainerDefinition(mockTJsvr.URL, tEntry),
+		Env:        getNewContainerDefinition(mockTJsvr.URL, tEntry),
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.NetworkMode = "host"
 		},
@@ -595,7 +595,7 @@ func TestReplicaOdj(t *testing.T) {
 	}, nil)
 
 	// Job multi estágio que vai ficar periodicamente checando mensagens nos tópicos subscritos
-	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) { // TODO: alterar interface para MultiStage, Done() não é necessário
+	st.AddJobMultiStage(func(dcag stage.DoneCancelArgGet) {
 		ticker := time.NewTicker(time.Millisecond * 100)
 		defer ticker.Stop()
 		checkMessages(consumer, topicMessages, t)
